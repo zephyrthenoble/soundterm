@@ -2,11 +2,12 @@ from sqlmodel import SQLModel, Field
 from typing import Optional
 import musicbrainzngs
 from pprint import pprint
-from uuid import uuid4
+from uuid import uuid4, UUID
 import json
 from datetime import datetime
 from soundterm.utils.filename_parser import SmartParser
 from pathlib import Path
+from os import PathLike
 
 from soundterm.models.track import TrackMetadata
 from acoustid import (
@@ -16,10 +17,11 @@ from acoustid import (
 )
 
 
-filepath_to_song_cache: dict[str, "Song"] = {}
+filepath_to_song_cache: dict[PathLike, "Song"] = {}
 
 fingerprint_to_song_cache: dict[str, "Song"] = {}
 
+SCORE_THRESHOLD = 0.7
 DEFAULT_TIMEOUT = 30
 API_KEY = "iRDSOogTx3"  # Replace with your actual AcoustID API key
 
@@ -50,16 +52,20 @@ track_patterns: list[tuple[str, str]] = [
 ]
 
 
-class Album(SQLModel):
-    id: str
+type UUIDType = str
+
+
+class CollectionAlbumMetadata(SQLModel):
+    id: str = Field(default_factory=uuid4, primary_key=True)
+    path: str
     title: str
     artists: list[str] = Field(default_factory=list)
-    songs: list["Song"] = Field(default_factory=list)
+    songs: list[str] = Field(default_factory=list)
     filename_metadata_pattern: str | None = None
     created_at: datetime = Field(default_factory=datetime.now)
 
     @staticmethod
-    def from_file_path(file_path: str) -> "Album":
+    def from_file_path(file_path: PathLike) -> "CollectionAlbumMetadata":
         fpath = Path(file_path)
         album_name = fpath.parent.name
         album_meta_path = fpath.parent / "album_meta.json"
@@ -102,23 +108,36 @@ class Album(SQLModel):
                     print(
                         "Warning: The provided regex pattern did not match the file name. Please double-check your pattern and try again."
                     )
-            album_meta = Album(
+            album_meta = CollectionAlbumMetadata(
                 id=str(uuid4()),
                 title=album_name,
                 artists=artists,
                 songs=[],
                 filename_metadata_pattern=filename_metadata_pattern,
+                path=str(fpath.parent),
             )
-            with open(album_meta_path, "w") as f:
-                json.dump(album_meta.model_dump(), f, indent=4)
+            album_meta.save()
 
         else:
             with open(album_meta_path, "r") as f:
                 album_meta_data = json.load(f)
-                album_meta = Album.model_validate_json(json.dumps(album_meta_data))
+                jsonstring = json.dumps(album_meta_data)
+                print(f"Loaded album metadata for {album_name} from {album_meta_path}")
+                album_meta = CollectionAlbumMetadata.model_validate_json(jsonstring)
         return album_meta
 
-    def parse_song_filename(self, filename: str) -> TrackMetadata:
+    def save(self) -> None:
+        album_meta_path = Path(self.path) / "album_meta.json"
+        try:
+            album_meta_path.write_text(self.model_dump_json(indent=4))
+        except TypeError:
+            print(
+                f"Error saving album metadata to {album_meta_path}. Ensure all fields are JSON serializable."
+            )
+            if album_meta_path.exists():
+                album_meta_path.unlink()  # Remove the file if it was partially written
+
+    def parse_song_filename(self, filename: PathLike) -> TrackMetadata:
         if self.filename_metadata_pattern is None:
             raise ValueError("filename_metadata_pattern is not set for this album")
         parsed_data = parser.parse(self.filename_metadata_pattern, filename)
@@ -137,21 +156,18 @@ class Album(SQLModel):
 
 
 class Song(SQLModel):
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: Optional[UUID] = Field(default=None, primary_key=True)
+    metadata: TrackMetadata
     fingerprint: str = Field(default=None, unique=True)
-    file_paths: set[str] = Field(sa_column_kwargs={"type_": "TEXT"})
-    title: str
-    duration: float
-    artists: list[str] = Field(default_factory=list)
-    album: str | None = None
+    file_paths: set[PathLike] = Field(sa_column_kwargs={"type_": "TEXT"})
     created_at: datetime = Field(default_factory=datetime.now)
+    album_metadata: Optional[CollectionAlbumMetadata] = None
 
     @staticmethod
-    def from_file_path(file_path: str) -> "Song":
+    def from_file_path(file_path: PathLike) -> "Song":
         # Placeholder implementation: In a real application, you would extract metadata from the file
 
         duration, fingerprint = fingerprint_file(file_path)
-        fpath = Path(file_path)
 
         song = None
         if fingerprint is None:
@@ -159,7 +175,7 @@ class Song(SQLModel):
                 f"Could not generate fingerprint for file: {file_path}"
             )
 
-        album_meta = Album.from_file_path(file_path)
+        album_meta = CollectionAlbumMetadata.from_file_path(file_path)
         album_track_metadata = album_meta.parse_song_filename(file_path)
         album_track_metadata.duration = duration
         album_track_metadata.fingerprint = fingerprint
@@ -188,157 +204,71 @@ class Song(SQLModel):
                 DEFAULT_TIMEOUT,
             )
             pprint(recording_response)
-            id_to_recording = {}
-            if recording_response["status"] == "ok" and recording_response["results"]:
-                from acoustid import parse_lookup_result
 
-                for score, _id, title, artist_names in parse_lookup_result(
-                    recording_response
-                ):
+            print("Existing Metadata:")
+            print(file_path)
+            for key, value in combined_track_metadata.model_dump().items():
+                print(f"  {key}: {value}")
+            count = 1
+            count_to_recording = {}
+            for result in recording_response.get("results", []):
+                score = result.get("score", 0)
+                if score < SCORE_THRESHOLD:
+                    continue
+                print(f"Score: {score}")
+                for recording in result.get("recordings", []):
+                    recording_id = recording.get("id")
+                    count_to_recording[count] = recording
+                    releases = recording.get("releasegroups", [])
+                    release_titles = [release.get("title") for release in releases]
+                    print(f"- Recording {count}: {recording_id}")
+                    print(f"  - Title: {recording.get('title')}")
                     print(
-                        f"Score: {score}, ID: {_id}, Title: {title}, Artists: {artist_names}"
+                        f"  - Artists: {[artist.get('name') for artist in recording.get('artists', [])]}"
                     )
-                    print(f"File name: {fpath.stem}, File suffix: {fpath.suffix}")
-                    # compare title and artist names to file name to see if they match
-                    if fpath.stem.lower() in title.lower():
-                        print("Title matches file name!")
-                    if any(
-                        artist_name.lower() in fpath.stem.lower()
-                        for artist_name in artist_names
-                    ):
-                        print("Artist name matches file name!")
-                    id_to_recording[_id] = {
-                        "title": title,
-                        "artists": [artist_names],
-                        "score": score,
-                        "id": _id,
-                        "title_match": combined_track_metadata.compare_title(title),
-                    }
-                id_to_release_group = {}
-                results = recording_response["results"]
-                for result in results:
-                    for recording in result.get("recordings", []):
-                        for release_group in recording.get("releasegroups", []):
-                            release_group_id = release_group["id"]
-                            if release_group_id not in id_to_release_group:
-                                id_to_release_group[release_group_id] = release_group
-                            id_to_recording[recording["id"]]["release_group"] = (
-                                release_group
-                            )
+                    print(f"  - Releases: {release_titles}")
+                    print()
+                    count += 1
+            print(
+                "Please enter the recording number that best matches the song, or press enter to skip:"
+            )
+            recording_selection = input()
+            if recording_selection.isdigit():
+                selected_count = int(recording_selection)
+                selected_recording = count_to_recording.get(selected_count)
+            else:
+                selected_recording = None
 
-                if len(id_to_recording) > 1:
-                    print("Multiple recordings found")
-                    # sort by score
-                    sorted_recordings = sorted(
-                        id_to_recording.values(), key=lambda x: x["score"], reverse=True
-                    )
-                    SCORE_THRESHOLD = 0.7
-                    found_recordings = []
-                    for recording in sorted_recordings:
-                        if recording["score"] < SCORE_THRESHOLD:
-                            print(
-                                f"Low score ({recording['score']}) for recording {recording['id']}, skipping detailed comparison."
-                            )
-                            break
-                        if recording["title_match"]:
-                            found_recordings.append(recording)
-
-                    if len(found_recordings) == 1:
-                        found_recording = found_recordings[0]
-                    elif len(found_recordings) > 1:
-                        print(
-                            "Warning: Multiple recordings have title matches. This may indicate an issue with the metadata or multiple versions of the same song."
-                        )
-
-                        ### Test release group metadata to see if it can help us narrow down the results further
-                        # If there are multiple found recordings, we can try to use the release group information to further narrow down the results
-                        for (
-                            release_group_id,
-                            release_group,
-                        ) in id_to_release_group.items():
-                            print(f"Release Group ID: {release_group_id}")
-                            print(f"Title: {release_group.get('title')}")
-                            print(
-                                f"Primary Type: {release_group.get('primary_type')}, Secondary Types: {release_group.get('secondary_types')}"
-                            )
-                            print(
-                                f"Artists: {[artist['name'] for artist in release_group.get('artists', [])]}"
-                            )
-                            if release_group.get("primary_type") == "Album":
-                                album_title = release_group.get("title", "").lower()
-                                if album_title and album_title in fpath.stem.lower():
-                                    print(
-                                        f"Album title '{album_title}' matches file name, selecting recording with release group '{release_group.get('title')}'"
-                                    )
-                                    found_recordings = [
-                                        rec
-                                        for rec in found_recordings
-                                        if rec.get("release_group", {}).get("id")
-                                        == release_group_id
-                                    ]
-                                    break
-
-                    if len(found_recordings) == 1:
-                        found_recording = found_recordings[0]
-                    elif len(found_recordings) > 1:
-                        print(
-                            "Warning: Multiple recordings have title matches and album matches. This may indicate an issue with the metadata or multiple versions of the same song."
-                        )
-
-                        ### Use deepdiff to compare the metadata of the found recordings and see if we can find any differences that would help us narrow down the results
-
-                        import deepdiff
-
-                        # create pairwise combinations of found_recordings
-                        pairs = []
-                        for i in range(len(found_recordings)):
-                            for j in range(i + 1, len(found_recordings)):
-                                pairs.append((found_recordings[i], found_recordings[j]))
-
-                        diffs = []
-                        print(f"Comparing {len(pairs)} pairs of release groups:")
-                        for pair in pairs:
-                            diff = deepdiff.DeepDiff(
-                                pair[0], pair[1], ignore_order=True
-                            )
-                            print(f"Comparing {pair[0]['id']} and {pair[1]['id']}:")
-                            print(diff)
-                            diffs.append((pair[0]["id"], pair[1]["id"], diff))
-
-                        print("Finished comparing pairs of release groups.")
-                        # use user input to select the correct recording based on the differences
-                        print(
-                            "Please review the differences above and enter the ID (from the start) of the correct recording:"
-                        )
-                        selected_id = input().strip()
-                        found_recording = None
-                        for recording in found_recordings:
-                            if recording["id"].startswith(selected_id):
-                                found_recording = recording
-                                break
-
-                else:
-                    print("Only one recording found for this fingerprint.")
-                    found_recording = list(id_to_recording.values())[0]
-
-                if not found_recording:
-                    raise ValueError("No suitable recording found for this fingerprint")
-
+            artist_list = (
+                [x["name"] for x in selected_recording.get("artists", [])]
+                if selected_recording
+                else []
+            )
+            if selected_recording:
+                releases = selected_recording.get("releasegroups", [])
+                release_titles = [release.get("title") for release in releases]
                 found_track_metadata = TrackMetadata(
                     path=file_path,
-                    title=found_recording.get("title"),
-                    artists=found_recording.get("artists", []),
-                    album=found_recording.get("release_group", {}).get("title"),
+                    title=selected_recording.get("title"),
+                    artists=",".join(artist_list),
+                    album=release_titles[0] if release_titles else None,
                 )
                 combined_track_metadata = combined_track_metadata + found_track_metadata
-                song = Song(
-                    file_paths={file_path},
-                    fingerprint=fingerprint,
-                    title=combined_track_metadata.title or file_path.split("/")[-1],
-                    artists=combined_track_metadata.artists or [],
-                    album=combined_track_metadata.album or "",
-                    duration=duration,  # Duration would be extracted from the file
-                )
+            print(combined_track_metadata)
+            song = Song(
+                id=uuid4(),
+                file_paths={file_path},
+                fingerprint=fingerprint,
+                metadata=combined_track_metadata,
+                album_metadata=album_meta,
+            )
+            if (
+                song.album_metadata
+                and song.id
+                and str(song.id) not in song.album_metadata.songs
+            ):
+                song.album_metadata.songs.append(str(song.id))
+                song.album_metadata.save()
         if song is None:
             raise ValueError(f"Could not create song from file: {file_path}")
         fingerprint_to_song_cache[fingerprint] = song
