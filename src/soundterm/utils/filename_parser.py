@@ -23,6 +23,11 @@ class SmartParser:
 
         matches = list(re.finditer(tag_regex, template))
         print(f"[SmartParser] Found {len(matches)} template tags")
+        if len(matches) == 0:
+            print(
+                "[SmartParser] No template tags found. Using escaped template as regex."
+            )
+            return f"^{regex_string}$"
 
         # Replace from right to left to maintain index integrity
         for match in reversed(matches):
@@ -57,7 +62,8 @@ class SmartParser:
         print(f"[SmartParser] Parsing filename: {filename}")
         print(f"[SmartParser] Name without extension: {name_only}")
 
-        pattern = self._build_regex(template)
+        # pattern = self._build_regex(template)
+        pattern = template
         print(f"[SmartParser] Using regex pattern: {name_only} -> {pattern}")
         match = re.match(pattern, name_only)
 

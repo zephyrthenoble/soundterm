@@ -35,7 +35,7 @@ type TrackMetadataCombinePathStrategy = Literal["self", "other", "raise"]
 
 
 class TrackMetadata(SQLModel):
-    path: PathLike
+    path: PathLike | None = None
     track_number: Optional[int] = None
     title: Optional[str] = None
     artists: Optional[str] = ""
@@ -255,6 +255,9 @@ class TrackMetadata(SQLModel):
 
     def audio_analysis(self) -> None:
         # Load audio file
+        if not self.path:
+            print("Warning: No path provided for audio analysis.")
+            return
         y, sr = librosa.load(self.path, sr=self.sample_rate)
 
         self.sample_rate = sr
@@ -299,6 +302,9 @@ class TrackMetadata(SQLModel):
 
     def extract_metadata(self):
         metadata = {}
+        if not self.path:
+            print("Warning: No path provided for audio analysis.")
+            return
         print(self.path)
         try:
             try:
@@ -460,7 +466,7 @@ class TrackMetadata(SQLModel):
                     self.parsed_track = track_number
                     if not self.track_number:
                         self.track_number = track_number
-                    if match.groupdict().get("artist") and not self.artist:
+                    if match.groupdict().get("artists") and not self.artists:
                         self.artist = match.group("artist").strip()
                     if match.groupdict().get("album") and not self.releases:
                         self.releases = [match.group("album").strip()]
@@ -480,6 +486,69 @@ class TrackMetadata(SQLModel):
         chroma_mean = np.mean(chroma, axis=1)
         key_idx = np.argmax(chroma_mean)
         return key_names[key_idx]
+
+    @staticmethod
+    def from_acoustid_result(results: dict, score_threshold: float) -> "TrackMetadata":
+        """@brief Create TrackMetadata from an AcoustID lookup result.
+
+        @param results The raw result dict from an AcoustID API lookup.
+        @param score_threshold Minimum score to consider a result valid.
+        @return A TrackMetadata instance populated with data from the result.
+        """
+        queried_metadata = TrackMetadata()
+        if results.get("status") != "ok":
+            raise ValueError(f"Invalid AcoustID result status: {results.get('status')}")
+
+        results_list = results.get("results", [])
+        print(f"Total results from AcoustID: {len(results_list)}")
+        results_list = [x for x in results_list if x.get("score", 0) >= score_threshold]
+        print(f"Results above score threshold {score_threshold}: {len(results_list)}")
+
+        count_to_recording: dict[int, dict] = {}
+        count = 1
+        if not results_list:
+            print("No results meet the score threshold.")
+            return queried_metadata
+        for result in results_list:
+            score = result.get("score", 0)
+            print(f"Score: {score}")
+            recordings = result.get("recordings", [])
+            if not recordings:
+                print("No recordings found for this result.")
+                print(f"Result data: {result}")
+                continue
+            else:
+                for recording in recordings:
+                    recording_id = recording.get("id")
+                    count_to_recording[count] = recording
+                    releases = recording.get("releasegroups", [])
+                    release_titles = [release.get("title") for release in releases]
+                    print(f"- Recording {count}: {recording_id}")
+                    print(f"  - Title: {recording.get('title')}")
+                    print(
+                        f"  - Artists: {[artist.get('name') for artist in recording.get('artists', [])]}"
+                    )
+                    print(f"  - Releases: {release_titles}")
+                    print()
+                    count += 1
+
+        for result in results_list:
+            result_id = result.get("id", "N/A")
+            result_score = result.get("score", 0)
+            print(f"Processing result ID: {result_id} with score: {result_score}")
+
+            metadata = TrackMetadata()
+            if "recordings" in result and len(result["recordings"]) > 0:
+                recording = result["recordings"][0]
+                metadata.title = recording.get("title")
+                if "artists" in recording and len(recording["artists"]) > 0:
+                    metadata.artists = recording["artists"][0].get("name", "")
+                if "releases" in recording and len(recording["releases"]) > 0:
+                    metadata.releases = [
+                        r.get("title", "") for r in recording["releases"]
+                    ]
+            return metadata
+        return queried_metadata
 
     def create_preview_segments(
         self, file_path: str, segment_duration: float = 5.0
