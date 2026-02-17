@@ -2,6 +2,8 @@ import re
 
 
 class SmartParser:
+    """Unfortunately made using AI, this doesn't work very well. It tries to be too smart and ends up being too dumb."""
+
     def __init__(self):
         # Configuration for specific types
         self.type_patterns = {

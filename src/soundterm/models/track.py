@@ -57,6 +57,19 @@ class TrackMetadata(SQLModel):
     parsed_title: Optional[str] = None
     parsed_track: Optional[int] = None
 
+    def filter_attributes(
+        self, include: set[str] = None, exclude: set[str] = None
+    ) -> dict[str, TrackMetadataType]:
+        """@brief Get a dict of the TrackMetadata attributes excluding specified fields.
+
+        @param exclude Set of attribute names to exclude from the result.
+        @return Dict of attribute names and values, excluding the specified fields.
+        """
+        included_fields = set(self.__fields__.keys()) if include is None else include
+        excluded_fields = set() if exclude is None else exclude
+        fields_to_include = included_fields - excluded_fields
+        return {field: getattr(self, field) for field in fields_to_include}
+
     def compare_title(self, other_title: str) -> bool:
         """@brief Compare track title with another string, ignoring common variations.
 

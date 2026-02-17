@@ -10,12 +10,22 @@ from datetime import datetime
 from soundterm.utils.filename_parser import SmartParser
 from pathlib import Path
 from os import PathLike
+from pprint import pprint
 
 from soundterm.models.track import TrackMetadata
+from soundterm.settings import Settings
 from acoustid import (
     fingerprint_file,
     FingerprintGenerationError,
 )
+
+
+def try_multiple_keys(data: dict, *keys):
+    for key in keys:
+        if key in data:
+            return data[key]
+    return None
+
 
 filepath_to_albums = {}
 
@@ -52,6 +62,10 @@ track_patterns: list[tuple[str, str]] = [
     (r"^Track\s*(?P<track>\d{1,3})\s*[-._\s]*(?P<title>.+)$", "Track 01 - Title"),
     (r"^(?P<track>\d{1,3})\s*[-._\s]+(?P<title>.+)$", "01 - Title"),
     (r"^(?P<track>\d{1,3})\s*\.?\s*(?P<title>.+)$", "01 Title"),
+    (
+        r"^(?P<track>\d{1,3})\s*\.?\s*(?P<artist>.+)\s*-\s*(?P<title>.+)$",
+        "01 Artist - Title",
+    ),
 ]
 
 
@@ -66,6 +80,7 @@ class CollectionAlbumMetadata(SQLModel):
     songs: list["Song"] = Field(default_factory=list)
     filename_metadata_pattern: str | None = None
     created_at: datetime = Field(default_factory=datetime.now)
+    default_order: str | None = None
 
     @property
     def song_paths(self) -> set[PathLike]:
@@ -76,7 +91,7 @@ class CollectionAlbumMetadata(SQLModel):
 
     @staticmethod
     def from_file_path(
-        file_path: PathLike, force: bool = False, continue_on_success: bool = True
+        file_path: PathLike, force: bool = False, continue_on_success: bool = False
     ) -> "CollectionAlbumMetadata":
         fpath = Path(file_path)
         album_name = fpath.parent.name
@@ -89,7 +104,7 @@ class CollectionAlbumMetadata(SQLModel):
             else:
                 print(f"No album metadata found for {album_name} at {album_meta_path}")
             album_name_input = input(
-                f"Enter album name, or press enter to use folder name '{album_name}':"
+                f"Enter album name, or press enter to use folder name '{album_name}': "
             )
             if album_name_input.strip():
                 album_name = album_name_input.strip()
@@ -97,7 +112,7 @@ class CollectionAlbumMetadata(SQLModel):
                 print(f"Using folder name '{album_name}' as album name.")
 
             artists_input = input(
-                "Enter comma separated list of artists for this album, or press enter to skip:"
+                "Enter comma separated list of artists for this album, or press enter to skip: "
             )
             artists = []
             if artists_input.strip():
@@ -109,7 +124,7 @@ class CollectionAlbumMetadata(SQLModel):
 
                 print(f"Current song: {fpath.name}")
                 filename_metadata_pattern = input(
-                    "Enter a number to select a track pattern, or enter a custom regex pattern with named groups (e.g. (?P<artist>.+) - (?P<album>.+) - (?P<track>\\d{1,3}) - (?P<title>.+))"
+                    "Enter a number to select a track pattern, or enter a custom regex pattern with named groups\n (e.g. (?P<artist>.+) - (?P<album>.+) - (?P<track>\\d{1,3}) - (?P<title>.+))\n"
                 )
                 if filename_metadata_pattern.isdigit():
                     pattern_idx = int(filename_metadata_pattern) - 1
@@ -121,8 +136,9 @@ class CollectionAlbumMetadata(SQLModel):
                 # validate custom regex pattern by trying to parse the file name
                 test_result = parser.parse(filename_metadata_pattern, fpath.name)
                 print(
-                    f"Test parsing filename '{fpath.name}' with pattern '{filename_metadata_pattern}': {test_result}"
+                    f"Test parsing filename '{fpath.name}' with pattern '{filename_metadata_pattern}':"
                 )
+                pprint(test_result)
                 if test_result is None:
                     print(
                         "Warning: The provided regex pattern did not match the file name. Please double-check your pattern and try again."
@@ -152,6 +168,7 @@ class CollectionAlbumMetadata(SQLModel):
                             continue
                         else:
                             print("Continuing with selected regex pattern.")
+                            break
             album_meta = CollectionAlbumMetadata(
                 id=str(uuid4()),
                 title=album_name,
@@ -233,17 +250,35 @@ class CollectionAlbumMetadata(SQLModel):
             if album_meta_path.exists():
                 album_meta_path.unlink()  # Remove the file if it was partially written
 
-    def parse_song_filename(self, filename: PathLike) -> TrackMetadata:
+    def parse_song_filename(
+        self: "CollectionAlbumMetadata", filename: PathLike
+    ) -> TrackMetadata:
         if self.filename_metadata_pattern is None:
             raise ValueError("filename_metadata_pattern is not set for this album")
         parsed_data = parser.parse(self.filename_metadata_pattern, filename)
+        print("Album parsed from filename")
+        releases = [self.title] if self.title else []
+        if not releases:
+            album_from_filename = try_multiple_keys(parsed_data, "album", "release")
+            if album_from_filename:
+                releases.append(album_from_filename)
+        print(releases)
         if parsed_data:
-            return TrackMetadata(
+            track_metadata = TrackMetadata(
                 path=filename,
-                track_number=parsed_data.get("track", parsed_data.get("trackno")),
-                title=parsed_data.get("title"),
-                album=parsed_data.get("album"),
+                track_number=try_multiple_keys(parsed_data, "track", "trackno"),
+                title=try_multiple_keys(parsed_data, "title"),
+                artists=try_multiple_keys(
+                    parsed_data, "artist", "artists", "artistname", "artistnames"
+                ),
+                releases=releases,
             )
+            print("Parsed track metadata from filename:")
+            print(track_metadata)
+            print(track_metadata.releases)
+            track_metadata.releases = releases
+            print(track_metadata.releases)
+            return track_metadata
         else:
             print(
                 f"Could not parse filename '{filename}' with pattern '{self.filename_metadata_pattern}'"
@@ -295,7 +330,7 @@ def track_lookup(apikey, track_id: str, meta: list[str] | None = None, timeout=N
 
 class Song(SQLModel):
     id: Optional[UUID] = Field(default=None, primary_key=True)
-    metadata: TrackMetadata
+    track_metadata: TrackMetadata
     fingerprint: str = Field(default=None, unique=True)
     file_paths: set[PathLike] = Field(sa_column_kwargs={"type_": "TEXT"})
     created_at: datetime = Field(default_factory=datetime.now)
@@ -324,6 +359,9 @@ class Song(SQLModel):
     @staticmethod
     def from_file_path(file_path: PathLike) -> Optional["Song"]:
 
+        song: Optional["Song"] = None
+
+        # Check if we've already processed this file path directory before and have album metadata cached
         album_meta = CollectionAlbumMetadata.from_file_path(file_path)
         if file_path in album_meta.song_paths:
             print(
@@ -333,62 +371,107 @@ class Song(SQLModel):
                 song for song in album_meta.songs if file_path in song.file_paths
             )
 
+        # validate file exists and is not empty before trying to generate fingerprint
         fpath = Path(file_path)
         file_size = fpath.stat().st_size
         if file_size == 0:
             print(f"File {file_path} is empty. Skipping empty files.")
             return None
+
+        # attempt to generate fingerprint and duration using pyacoustid
         try:
             print(f"Generating fingerprint for {file_path}...")
             duration, fingerprint = fingerprint_file(file_path, force_fpcalc=True)
+            if fingerprint is None:
+                raise FingerprintGenerationError(
+                    f"Could not generate fingerprint for file: {file_path}"
+                )
+            if duration is None:
+                raise FingerprintGenerationError(
+                    f"Could not determine duration for file: {file_path}"
+                )
         except FingerprintGenerationError as e:
+            # if fingerprinting fails, check if the file is a valid audio file using ffmpeg
             print(f"Error generating fingerprint for {file_path}: {e}")
             is_valid = is_audio_file_valid_probe(file_path)
             if not is_valid:
                 print(f"File {file_path} is invalid. Skipping.")
                 return None
             else:
+                # if the file appears to be valid but fingerprint generation fails, this may indicate an issue with the fingerprinting process or an edge case with the file
                 print(
                     f"File {file_path} appears to be a valid audio file. Please investigate the fingerprint generation"
                 )
                 raise
 
-        song = None
-        if fingerprint is None:
-            raise FingerprintGenerationError(
-                f"Could not generate fingerprint for file: {file_path}"
-            )
-        if duration is None:
-            raise FingerprintGenerationError(
-                f"Could not determine duration for file: {file_path}"
-            )
-
+        track_metadata = TrackMetadata(
+            path=file_path, duration=duration, fingerprint=fingerprint
+        )
         album_track_metadata = album_meta.parse_song_filename(file_path)
-        album_track_metadata.duration = duration
-        album_track_metadata.fingerprint = fingerprint
 
         extracted_track_metadata = TrackMetadata(path=file_path)
 
         extracted_track_metadata.extract_metadata()
 
-        combined_track_metadata = extracted_track_metadata + album_track_metadata
+        if album_meta.default_order:
+            selection = album_meta.default_order
+        else:
+            print(
+                f"Album track metadata: {album_track_metadata.filter_attributes({'releases', 'artists', 'title', 'track_number'})}"
+            )
+            print(
+                f"Extracted track metadata: {extracted_track_metadata.filter_attributes({'releases', 'artists', 'title', 'track_number'})}"
+            )
+            selection = (
+                input(
+                    f"Select default metadata source priority for {file_path}\n\t* a for just album\n\t* e for just extracted\n\t* ae for album then extracted\n\t* ea for extracted then album: (default: ae)\n"
+                )
+                .strip()
+                .lower()
+            )
+        if selection == "a":
+            combined_track_metadata = album_track_metadata
+        elif selection == "e":
+            combined_track_metadata = extracted_track_metadata
+        elif selection == "ae":
+            combined_track_metadata = album_track_metadata + extracted_track_metadata
+        elif selection == "ea":
+            combined_track_metadata = extracted_track_metadata + album_track_metadata
+        else:
+            print("Invalid selection, defaulting to album then extracted metadata")
+            combined_track_metadata = album_track_metadata + extracted_track_metadata
+            selection = "ae"
+
+        combined_track_metadata = track_metadata + combined_track_metadata
+        if not album_meta.default_order:
+            set_as_default = (
+                input(
+                    f"Use selection '{selection}' as default for this album? (y/n, default: n): "
+                )
+                .strip()
+                .lower()
+            )
+            if set_as_default == "y":
+                album_meta.default_order = selection
+                album_meta.save()
 
         print(file_path)
+        settings = Settings()  # type: ignore
+        if settings.analyze_song:
+            combined_track_metadata.analyze_song()
         print(f"Combined track metadata: {combined_track_metadata}")
-        for key, value in combined_track_metadata.model_dump().items():
-            print(f"  {key}: {value}")
         if fingerprint in fingerprint_to_song_cache:
             song = fingerprint_to_song_cache[fingerprint]
             song.file_paths.add(file_path)
         else:
-            print(combined_track_metadata)
             song = Song(
                 id=uuid4(),
                 file_paths={file_path},
                 fingerprint=fingerprint,
-                metadata=combined_track_metadata,
+                track_metadata=combined_track_metadata,
                 album_metadata_id=album_meta.id,
             )
+            song.pretty_print()
             if (
                 album_meta
                 and song.id
@@ -402,18 +485,28 @@ class Song(SQLModel):
         filepath_to_song_cache[file_path] = song
         return song
 
+    def pretty_print(self) -> None:
+        print(f"Song ID: {self.id}")
+        print(f"File Paths: {self.file_paths}")
+        print(f"Fingerprint: {self.fingerprint[:10]}... (truncated)")
+        print("Track Metadata:")
+        for key, value in self.track_metadata.model_dump().items():
+            if key in ["fingerprint", "id", "file_paths"]:
+                continue
+            print(f"  {key}: {value}")
+
     def query_acoustid(self, score_threshold: float = SCORE_THRESHOLD) -> None:
         """@brief Query the AcoustID API for metadata based on the song's fingerprint and duration.
         Updates the song's metadata with the best matching result that meets the score threshold.
         """
         from soundterm.models.acoustid import AcoustIDLookupResults
 
-        if not self.fingerprint or not self.metadata.duration:
+        if not self.fingerprint or not self.track_metadata.duration:
             raise ValueError(
                 "Song must have a fingerprint and duration to query AcoustID."
             )
         results = AcoustIDLookupResults.trackmetadata_from_fingerprint_results(
-            self.fingerprint, self.metadata.duration, score_threshold
+            self.fingerprint, self.track_metadata.duration, score_threshold
         )
         if results:
             for idx, result in enumerate(results, start=1):

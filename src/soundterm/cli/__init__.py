@@ -8,18 +8,27 @@ from pathlib import Path
 import json
 
 
-# add to system path so pyacoustid can find it
+def test_sqlmodel() -> None:
+    song = Song(
+        title="Test Song",
+        artist="Test Artist",
+        album="Test Album",
+        duration=300,
+        fingerprint="abc123",
+        metadata={"key": "value"},
+    )
+    print(song)
 
 
 def main() -> None:
-
-    settings = soundterm.settings.Settings()
+    settings = soundterm.settings.Settings()  # type: ignore
     error_file_json_list = []
     error_file_list_path = Path(settings.error_file)
     if error_file_list_path.exists():
         with open(error_file_list_path, "r") as f:
             error_file_json_list = json.load(f)
     error_set = set(error_file_json_list)
+    # add to system path so pyacoustid can find it
     if str(settings.fpcalc) not in os.environ["PATH"]:
         os.environ["PATH"] += os.pathsep + os.path.dirname(str(settings.fpcalc))
     try:
