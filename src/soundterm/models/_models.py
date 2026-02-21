@@ -1,4 +1,5 @@
-from sqlmodel import SQLModel, Field
+from __future__ import annotations
+from sqlmodel import SQLModel, Field, Relationship
 from typing import Optional, Literal
 from datetime import datetime
 from pathlib import Path
@@ -8,14 +9,14 @@ from os import PathLike
 
 from soundterm.utils import try_multiple_keys
 from soundterm.utils import SmartParser
-from soundterm.settings import Settings
+from soundterm.settings import get_settings
+from soundterm.models import Tag
 
 
-type Tag = str
 type Fingerprint = str
 
 type TrackMetadataType = (
-    str | int | float | list[float] | list[str] | list[Tag] | datetime | None
+    str | int | float | list[float] | set[PathLike] | set[Tag] | datetime | None
 )
 
 
@@ -29,6 +30,11 @@ type TrackMetadataListConflictStrategy = Literal["merge", "update", "raise"]
 
 type TrackMetadataCombineFingerprintsStrategy = Literal["self", "other", "raise"]
 type TrackMetadataCombinePathStrategy = Literal["self", "other", "raise"]
+
+
+class SongTagLink(SQLModel, table=True):
+    song_id: int = Field(foreign_key="song.id", primary_key=True)
+    tag_id: int = Field(foreign_key="tag.id", primary_key=True)
 
 
 class HashableIDMixin(SQLModel):
@@ -61,6 +67,7 @@ class Song(HashableIDMixin, SQLModel):
     file_paths: set[PathLike] = Field(sa_column_kwargs={"type_": "TEXT"})
     created_at: datetime = Field(default_factory=datetime.now)
     album_metadata_id: Optional[int] = None
+    tags: set[Tag] = Relationship(link_model=SongTagLink)
 
     _selected_path = None
 
@@ -98,7 +105,7 @@ class Song(HashableIDMixin, SQLModel):
         """
         from soundterm.models import AcoustIDLookupResults
 
-        settings = Settings()  # type: ignore
+        settings = get_settings()
         if score_threshold is None:
             score_threshold = settings.score_threshold
 

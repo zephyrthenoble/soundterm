@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 from pathlib import Path
 from os import PathLike
@@ -9,13 +10,13 @@ from acoustid import fingerprint_file, FingerprintGenerationError
 
 from pydantic import BaseModel, Field, ValidationError, DirectoryPath
 
-from soundterm.settings import Settings
+from soundterm.settings import get_settings
 from soundterm.models import TrackMetadata, Song, CollectionAlbumMetadata
 from soundterm.utils import SmartParser
 from soundterm.utils import is_audio_file_valid_probe
 from soundterm.enrichment import TrackAnalyzer
 
-fingerprint_to_song_cache: dict[str, "Song"] = {}
+fingerprint_to_song_cache: dict[str, Song] = {}
 filepath_to_albums: dict[Path, "CollectionAlbumMetadata"] = {}
 # Common track number patterns at the beginning of filename
 track_patterns: list[tuple[str, str]] = [
@@ -37,7 +38,7 @@ track_patterns: list[tuple[str, str]] = [
 ]
 
 
-settings = Settings()  # type: ignore
+settings = get_settings()
 
 
 class LibraryManager(BaseModel):

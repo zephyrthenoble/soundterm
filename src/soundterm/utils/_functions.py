@@ -7,6 +7,12 @@ import ffmpeg
 import musicbrainzngs
 
 
+def random_color() -> str:
+    import random
+
+    return "#{:06x}".format(random.randint(0, 0xFFFFFF))
+
+
 def use_musicbrainz() -> None:
     musicbrainzngs.set_useragent("SoundTerm", "0.2", "zephyrthenoble@gmail.com")
     username = "zephyrthenoble"

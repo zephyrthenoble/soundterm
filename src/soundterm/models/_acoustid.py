@@ -1,3 +1,4 @@
+from __future__ import annotations
 from sqlmodel import Field, SQLModel
 from pydantic import ConfigDict, model_validator
 import json

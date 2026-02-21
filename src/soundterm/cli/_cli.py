@@ -1,4 +1,4 @@
-import soundterm.settings
+from soundterm.settings import get_settings
 from soundterm.models import Song
 from soundterm.enrichment import LibraryManager
 
@@ -21,7 +21,7 @@ def test_sqlmodel() -> None:
 
 
 def main() -> None:
-    settings = soundterm.settings.Settings()  # type: ignore
+    settings = get_settings()
     error_file_json_list = []
     error_file_list_path = Path(settings.error_file)
     if error_file_list_path.exists():
