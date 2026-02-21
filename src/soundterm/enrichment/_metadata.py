@@ -1,6 +1,4 @@
-from sqlmodel import SQLModel, Field
-from typing import Optional, Iterable, cast, Literal
-from datetime import datetime
+from typing import Optional, Iterable, cast
 from mutagen import File as MutagenFile
 from mutagen._tags import Tags as MutagenTags
 from mutagen._file import FileType as MutagenFileType
@@ -15,36 +13,16 @@ import tempfile
 
 from os import PathLike, unlink
 
-type Tag = str
-type Fingerprint = str
 
-type TrackMetadataType = (
-    str | int | float | list[float] | list[str] | list[Tag] | datetime | None
-)
+from soundterm.models import TrackMetadata
 
-# For simple scalar fields, we can choose to keep either self or other when there is a conflict, or raise an error
-type TrackMetadataValueConflictStrategy = Literal["self", "other", "update", "raise"]
-
-# merge: for list fields, combine unique values from both (e.g. union of artists or tags)
-# update: for list fields, replace blank or None with non-empty values from the other
-# raise: for list fields, if both have non-empty values that differ, raise an error instead of merging
-type TrackMetadataListConflictStrategy = Literal["merge", "update", "raise"]
-
-type TrackMetadataCombineFingerprintsStrategy = Literal["self", "other", "raise"]
-type TrackMetadataCombinePathStrategy = Literal["self", "other", "raise"]
+from pydantic import BaseModel
 
 
-class TrackMetadata(SQLModel):
-    path: PathLike | None = None
-    track_number: Optional[int] = None
-    title: Optional[str] = None
-    artists: Optional[str] = ""
-    releases: list[str] = Field(default_factory=list, alias="albums")
-    tags: list[Tag] = Field(default_factory=list)
+class TrackAnalyzer(BaseModel):
+    path: PathLike
     duration: Optional[float] = None
-    fingerprint: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    sample_rate: Optional[float] = None
     tempo: Optional[float] = None
     brightness: Optional[float] = None
     mfcc_mean: Optional[list[float]] = None
@@ -53,206 +31,17 @@ class TrackMetadata(SQLModel):
     dynamic_range: Optional[float] = None
     zcr: Optional[float] = None
     valence: Optional[float] = None
-    sample_rate: Optional[int | float] = None
+    title: Optional[str] = None
+    artists: Optional[str] = None
+    releases: Optional[list[str]] = None
+    track_number: Optional[int] = None
     parsed_title: Optional[str] = None
     parsed_track: Optional[int] = None
 
-    def filter_attributes(
-        self, include: set[str] = None, exclude: set[str] = None
-    ) -> dict[str, TrackMetadataType]:
-        """@brief Get a dict of the TrackMetadata attributes excluding specified fields.
-
-        @param exclude Set of attribute names to exclude from the result.
-        @return Dict of attribute names and values, excluding the specified fields.
-        """
-        included_fields = set(self.__fields__.keys()) if include is None else include
-        excluded_fields = set() if exclude is None else exclude
-        fields_to_include = included_fields - excluded_fields
-        return {field: getattr(self, field) for field in fields_to_include}
-
-    def compare_title(self, other_title: str) -> bool:
-        """@brief Compare track title with another string, ignoring common variations.
-
-        This method performs a case-insensitive comparison of the track's title
-        against another string, while ignoring common formatting differences such
-        as punctuation, whitespace, and certain stop words. It is designed to
-        determine if two titles likely refer to the same song even if they are
-        not exact matches.
-
-        @param other_title The title string to compare against.
-        @return True if the titles are considered a match, False otherwise.
-        """
-
-        def normalize_title(title: str) -> str:
-            # Convert to lowercase
-            title = title.lower()
-            # Remove punctuation and special characters
-            title = re.sub(r"[^\w\s]", "", title)
-            # Remove extra whitespace
-            title = re.sub(r"\s+", " ", title).strip()
-            # Remove common stop words (optional)
-            stop_words = {"the", "a", "an", "and", "of", "in", "on", "for"}
-            title_words = [word for word in title.split() if word not in stop_words]
-            return " ".join(title_words)
-
-        normalized_self_title = normalize_title(self.title or "")
-        normalized_other_title = normalize_title(other_title or "")
-
-        return normalized_self_title == normalized_other_title
-
-    def _add_paths(
-        self,
-        other: Optional[PathLike],
-        strategy: TrackMetadataCombinePathStrategy = "raise",
-    ) -> Optional[PathLike]:
-        """@brief Combine two file paths, ensuring consistency.
-
-        When merging TrackMetadata from different sources, we may encounter cases
-        where both have a path but they differ. This method defines the logic for how to handle such conflicts based on the specified strategy.
-        @param other The other path to combine with self.
-        @param strategy The strategy to resolve conflicts: 'self' to keep self's path,
-        'other' to keep the other path, 'raise' to raise an error on conflict.
-        @return The combined path based on the specified strategy.
-        """
-
-        if self.path and other:
-            if self.path != other:
-                if strategy == "self":
-                    print(
-                        f"Conflict in paths: keeping self '{self.path}' over other '{other}'"
-                    )
-                    return self.path
-                elif strategy == "other":
-                    print(
-                        f"Conflict in paths: keeping other '{other}' over self '{self.path}'"
-                    )
-                    return other
-                elif strategy == "raise":
-                    raise ValueError(
-                        f"Cannot combine different paths: '{self.path}' vs '{other}'"
-                    )
-        return self.path or other
-
-    def _add_fingerprints(
-        self,
-        other: Optional[Fingerprint],
-        strategy: TrackMetadataCombineFingerprintsStrategy = "raise",
-    ) -> Optional[Fingerprint]:
-        """@brief Combine two audio fingerprints, ensuring consistency.
-
-        When merging TrackMetadata from different sources, we may encounter cases
-        where both have a fingerprint but they differ. This method defines the logic for how to handle such conflicts based on the specified strategy.
-        @param other The other fingerprint to combine with self.
-        @param strategy The strategy to resolve conflicts: 'self' to keep self's fingerprint,
-        'other' to keep the other fingerprint, 'raise' to raise an error on conflict.
-        @return The combined fingerprint based on the specified strategy.
-        """
-
-        if self.fingerprint and other:
-            if self.fingerprint != other:
-                if strategy == "self":
-                    print(
-                        f"Conflict in fingerprints: keeping self '{self.fingerprint}' over other '{other}'"
-                    )
-                    return self.fingerprint
-                elif strategy == "other":
-                    print(
-                        f"Conflict in fingerprints: keeping other '{other}' over self '{self.fingerprint}'"
-                    )
-                    return other
-                elif strategy == "raise":
-                    raise ValueError(
-                        f"Cannot combine different fingerprints: '{self.fingerprint}' vs '{other}'"
-                    )
-        return self.fingerprint or other
-
-    def __add__(
-        self,
-        other: object,
-        conflict_strategy: TrackMetadataValueConflictStrategy = "self",
-        list_merge_strategy: TrackMetadataListConflictStrategy = "merge",
-        combine_fingerprints: TrackMetadataCombineFingerprintsStrategy = "raise",
-    ) -> "TrackMetadata":
-        if not isinstance(other, TrackMetadata):
-            return NotImplemented
-
-        if self.path != other.path:
-            raise ValueError(
-                f"Cannot merge TrackMetadata with different paths: {self.path} vs {other.path}"
-            )
-
-        if (
-            self.fingerprint and other.fingerprint
-        ) and self.fingerprint != other.fingerprint:
-            raise ValueError(
-                f"Cannot merge TrackMetadata with different fingerprints: {self.fingerprint} vs {other.fingerprint}"
-            )
-
-        matched_fields = ["path", "fingerprint", "created_at", "updated_at"]
-        list_fields = ["artists", "tags", "albums", "releases"]
-        attrs: dict[str, TrackMetadataType] = {}
-        for field in self.__fields__:
-            self_value = getattr(self, field)
-            other_value = getattr(other, field)
-
-            if field in matched_fields:
-                # These fields must match exactly, so we can skip conflict resolution
-                attrs[field] = self_value or other_value
-                continue
-
-            if field in list_fields:
-                if field == "artists":
-                    # Special case for artists string field
-                    self_artists = (
-                        [a.strip() for a in self_value.split(",")] if self_value else []
-                    )
-                    other_artists = (
-                        [a.strip() for a in other_value.split(",")]
-                        if other_value
-                        else []
-                    )
-                    merged_artists = list(set(self_artists + other_artists))
-                    attrs[field] = ", ".join(merged_artists)
-                    continue
-                # For list fields, we can merge them and remove duplicates
-                # optionally we can raise an error if there is a conflict instead of merging
-                # If self or other, treat like normal
-                if list_merge_strategy == "merge" or list_merge_strategy == "update":
-                    merged_list = list(set((self_value or []) + (other_value or [])))
-                    attrs[field] = merged_list
-                    continue
-
-                elif list_merge_strategy == "raise":
-                    raise ValueError(
-                        f"List conflict for '{field}': '{self_value}' vs '{other_value}'"
-                    )
-                    continue
-
-            if (
-                self_value is not None
-                and other_value is not None
-                and self_value != other_value
-            ):
-                if conflict_strategy == "self" or conflict_strategy == "update":
-                    print(
-                        f"Conflict for '{field}': '{self_value}' vs '{other_value}' - keeping '{self_value}'"
-                    )
-                    attrs[field] = self_value
-                elif conflict_strategy == "other":
-                    print(
-                        f"Conflict for '{field}': '{self_value}' vs '{other_value}' - keeping '{other_value}'"
-                    )
-                    attrs[field] = other_value
-                elif conflict_strategy == "raise":
-                    raise ValueError(
-                        f"Conflict for '{field}': '{self_value}' vs '{other_value}'"
-                    )
-            else:
-                attrs[field] = self_value if self_value is not None else other_value
-        attrs["updated_at"] = (
-            datetime.now()
-        )  # Update the timestamp for the merged object
-        return TrackMetadata(**attrs)
+    def print_all_metadata(self):
+        self.analyze_song()
+        for field_name, value in self.__dict__.items():
+            print(f"{field_name}: {type(value)}")
 
     def analyze_song(self) -> None:
         # Always extract metadata first (this is more reliable)
@@ -271,7 +60,8 @@ class TrackMetadata(SQLModel):
         if not self.path:
             print("Warning: No path provided for audio analysis.")
             return
-        y, sr = librosa.load(self.path, sr=self.sample_rate)
+        y, _sr = librosa.load(self.path, sr=self.sample_rate)
+        sr = float(_sr)
 
         self.sample_rate = sr
         # Tempo and beat
@@ -388,28 +178,38 @@ class TrackMetadata(SQLModel):
             "copyright": "copyright",
         }
 
+        prefixes = ["TXXX:", "COMM:"]  # Common prefixes for custom tags
+        to_add = []
+        for prefix in prefixes:
+            for tag_key, meta_key in tag_mappings.items():
+                full_tag = prefix + tag_key
+                to_add.append((full_tag, meta_key))
+        for full_tag, meta_key in to_add:
+            tag_mappings[full_tag] = meta_key
+
         for tag_key, meta_key in tag_mappings.items():
-            print(f"Checking for tag: {tag_key}")
+            # print(f"Checking for tag: {tag_key}")
 
             try:
                 # there is an issue when checking for certain tags in some file types because of the special characters
                 # so we need to catch ValueError as we access the file object
                 if tag_key in audio_file:
                     audio_tag_value = audio_file[tag_key]
-                    print(f"Tag {tag_key} is of type {type(audio_tag_value)}")
+                    # print(f"Tag {tag_key} is of type {type(audio_tag_value)}")
                     if audio_tag_value is None:
-                        print(f"Tag {tag_key} is None, skipping.")
+                        # print(f"Tag {tag_key} is None, skipping.")
                         continue
                     elif isinstance(audio_tag_value, Iterable):
                         tag_list = list(audio_tag_value)
                         if len(tag_list) > 1:
-                            print(f"Tag {tag_key} is a list with multiple values.")
+                            # print(f"Tag {tag_key} is a list with multiple values.")
                             for v in tag_list:
-                                print(f" - {v}, type: {type(v)}")
+                                # print(f" - {v}, type: {type(v)}")
+                                pass
                             # Join multiple values into a single string
                             input("Press Enter to continue...")
                         elif len(tag_list) == 0:
-                            print(f"Tag {tag_key} is an empty list, skipping.")
+                            # print(f"Tag {tag_key} is an empty list, skipping.")
                             continue
                         else:
                             tag_value = cast(MutagenTags, tag_list[0])
@@ -455,7 +255,7 @@ class TrackMetadata(SQLModel):
 
         filename = Path(file_path).stem  # Get filename without extension
 
-        # Common track number patterns at the beginning of filename
+        # #TODO combine this somehow with the other system Common track number patterns at the beginning of filename
         track_patterns = [
             r"^(?P<artist>.+)\s+-\s+(?P<album>.+)\s+-\s+(?P<track>\d{1,3})\s+-\s+(?P<title>.+)$",  # "Artist - Album - 01 - Title"
             r"^(?P<artist>.+)\s+(?P<album>.+)\s+(?P<track>\d{1,3})\s+[-._\s]*(?P<title>.+)$",  # "Artist Album 01 Title"
@@ -479,8 +279,8 @@ class TrackMetadata(SQLModel):
                     self.parsed_track = track_number
                     if not self.track_number:
                         self.track_number = track_number
-                    if match.groupdict().get("artists") and not self.artists:
-                        self.artist = match.group("artist").strip()
+                    if match.groupdict().get("artist") and not self.artists:
+                        self.artists = match.group("artist").strip()
                     if match.groupdict().get("album") and not self.releases:
                         self.releases = [match.group("album").strip()]
                     break

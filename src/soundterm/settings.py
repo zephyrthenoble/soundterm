@@ -1,4 +1,4 @@
-from pydantic import Field, FilePath, DirectoryPath, NewPath
+from pydantic import Field, FilePath, DirectoryPath
 from os import PathLike
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +20,8 @@ DEFAULT_MUSIC_DIR: PathLike = Path.home() / "Music"
 DEFAULT_FPCALC_PATH: ExecutablePathType = Path("fpcalc")
 PARSE_CLI_ARGS: bool = True
 CLI_IMPLICIT_FLAGS: bool = True
+DEFAULT_SCORE_THRESHOLD = 0.7
+DEFAULT_TIMEOUT = 30
 
 
 class Settings(BaseSettings):
@@ -41,6 +43,11 @@ class Settings(BaseSettings):
         DirectoryPath, Field(default=DEFAULT_MUSIC_DIR, alias="music-dir")
     ]
     fpcalc: Annotated[ExecutablePathType, Field(default=DEFAULT_FPCALC_PATH)]
+    score_threshold: float = Field(
+        default=DEFAULT_SCORE_THRESHOLD, alias="score-threshold"
+    )
+    timeout: int = Field(default=DEFAULT_TIMEOUT, alias="timeout")
+    api_key: str = Field(alias="api-key", validation_alias="API_KEY")
     file: FilePath | None = Field(default=None)
 
     def model_post_init(self, __context: object) -> None:

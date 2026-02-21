@@ -1,5 +1,3 @@
-import re
-from joblib.test.test_memory import count_and_append
 from sqlmodel import Field, SQLModel
 from pydantic import ConfigDict, model_validator
 import json
@@ -10,7 +8,7 @@ from typing import Any, TYPE_CHECKING
 from pprint import pprint
 
 if TYPE_CHECKING:
-    from soundterm.models.track import TrackMetadata
+    from soundterm.models import TrackMetadata
 
 SCORE_THRESHOLD = 0.7
 DEFAULT_TIMEOUT = 30
@@ -132,7 +130,6 @@ class AcoustIDLookupResults(AcoustIDAPIModel):
         @param score_threshold Minimum score to consider a result valid.
         @return A TrackMetadata instance populated with data from the result.
         """
-        from soundterm.models.track import TrackMetadata
 
         track_metadata_ranking: dict[float, list["TrackMetadata"]] = {}
 
@@ -151,11 +148,12 @@ class AcoustIDLookupResults(AcoustIDAPIModel):
                 continue
             for recording in recordings:
                 recording_id = recording.id
-                releases = recording.get("releasegroups", [])
+                releases: list[AcoustIDReleaseGroup] = recording.releasegroups
+                print(f"releases: {releases}")
                 release_titles = [release.title for release in recording.releasegroups]
                 print(f"- Recording {count}: {recording_id}")
-                print(f"  - Title: {recording.title}")
-                print(f"  - Artists: {[artist.name for artist in recording.artists]}")
+                print(f"  - Title: {recording.title}")  # type: ignore
+                print(f"  - Artists: {[artist.name for artist in recording.artists]}")  # type: ignore
                 print(f"  - Releases: {release_titles}")
                 print()
                 count += 1
@@ -166,6 +164,7 @@ class AcoustIDLookupResults(AcoustIDAPIModel):
         if recording_selection.isdigit():
             selected_count = int(recording_selection)
             selected_recording = count_to_recording.get(selected_count)
+            print(f"Selected recording: {selected_recording}")
 
         return track_metadata_ranking
 
@@ -173,7 +172,7 @@ class AcoustIDLookupResults(AcoustIDAPIModel):
     def trackmetadata_from_fingerprint_results(
         fingerprint: str, duration: float, score_threshold: float
     ) -> list["TrackMetadata"]:
-        from soundterm.models.track import TrackMetadata
+        from soundterm.models import TrackMetadata
         from acoustid import lookup
 
         track_metadata_list: list[TrackMetadata] = []
@@ -203,8 +202,6 @@ class AcoustIDLookupResults(AcoustIDAPIModel):
         if not results:
             print("No matches found for this track.")
         else:
-            from soundterm.models.acoustid import AcoustIDLookupResults
-
             acoustid_lookup_results = AcoustIDLookupResults.model_validate_json(
                 json.dumps(recording_response)
             )
