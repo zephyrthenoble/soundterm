@@ -7,4 +7,3 @@ from soundterm.utils._functions import (
     track_lookup,
     flatten,
 )
-from soundterm.utils._database import SessionManager

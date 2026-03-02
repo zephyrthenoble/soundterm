@@ -1,5 +1,5 @@
 from __future__ import annotations
-from pydantic import Field, FilePath, DirectoryPath, BeforeValidator
+from pydantic import Field, DirectoryPath, BeforeValidator
 from os import PathLike
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +20,7 @@ PARSE_CLI_ARGS: bool = True
 CLI_IMPLICIT_FLAGS: bool = True
 DEFAULT_SCORE_THRESHOLD: float = 0.7
 DEFAULT_TIMEOUT: int = 30
+DEFAULT_DEBUG: bool = False
 
 
 def get_settings() -> Settings:
@@ -103,6 +104,7 @@ class Settings(BaseSettings):
     analyze_song: bool = Field(default=False, alias="analyze-song", flag=True)
     make_dirs: bool = Field(default=False, alias="make-dirs", flag=True)
     force_make_dirs: bool = Field(default=False, alias="force-make-dirs")
+    debug: bool = Field(default=DEFAULT_DEBUG, alias="debug", flag=True)
 
     # directory of this file needs to be created if it doesn't exist, but the file itself doesn't need to exist and will be created when writing to it
     database: PotentialFile = Field(default=DEFAULT_DATABASE_PATH)

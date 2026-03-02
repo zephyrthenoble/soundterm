@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Optional, Iterable, cast
 from mutagen import File as MutagenFile
 from mutagen._tags import Tags as MutagenTags
@@ -14,9 +15,9 @@ import tempfile
 from os import PathLike, unlink
 
 
-from soundterm.models import TrackMetadata
-
 from pydantic import BaseModel
+
+from soundterm.models import TrackMetadata
 
 
 class TrackAnalyzer(BaseModel):
@@ -37,6 +38,15 @@ class TrackAnalyzer(BaseModel):
     track_number: Optional[int] = None
     parsed_title: Optional[str] = None
     parsed_track: Optional[int] = None
+
+    @staticmethod
+    def analyze(self, track: TrackMetadata) -> None:
+        self.path = track.path
+        if not self.path:
+            raise ValueError("TrackMetadata must have a path to analyze.")
+        trackanalyzer = TrackAnalyzer(path=self.path)
+        trackanalyzer.analyze_song()
+        trackanalyzer.print_all_metadata()
 
     def print_all_metadata(self):
         self.analyze_song()
@@ -301,7 +311,7 @@ class TrackAnalyzer(BaseModel):
         return key_names[key_idx]
 
     @staticmethod
-    def from_acoustid_result(results: dict, score_threshold: float) -> "TrackMetadata":
+    def from_acoustid_result(results: dict, score_threshold: float) -> TrackMetadata:
         """@brief Create TrackMetadata from an AcoustID lookup result.
 
         @param results The raw result dict from an AcoustID API lookup.
