@@ -1,0 +1,33 @@
+[project]
+name = "soundterm"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "zephyrthenoble", email = "zephyrthenoble@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pygame-ce>=2.5.7",
+    "pygame-gui>=0.6.14",
+    "textual>=8.2.6",
+]
+
+[tool.pyrefly]
+project-includes = [
+    "**/*.py*",
+    "**/*.ipynb",
+]
+
+[project.scripts]
+soundterm = "soundterm:main"
+
+[build-system]
+requires = ["uv_build>=0.10.7,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pyrefly>=1.0.0",
+    "textual-dev>=1.8.0",
+]
