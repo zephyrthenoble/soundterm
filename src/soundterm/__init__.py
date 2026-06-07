@@ -1,7 +1,8 @@
-from soundterm.tui import MainApp
+from soundterm.tui import MainApp, debug
 
 
 def main():
+    debug["dirpicker"] = True
     app = MainApp()
     app.run()
 
