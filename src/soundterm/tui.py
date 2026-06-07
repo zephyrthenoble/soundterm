@@ -1,3 +1,4 @@
+from textual.containers import Container
 from textual.containers import Horizontal
 from textual.screen import Screen
 from textual.containers import VerticalGroup
@@ -43,14 +44,15 @@ class DirPicker(Screen):
     temp_library: reactive[Path | None] = reactive(None)
 
     def compose(self) -> ComposeResult:
-        with Horizontal():
-            yield Button("Select", id="select", variant="success", disabled=True)
-            yield Button("Clear", id="clear")
-            yield Button("Cancel", id="cancel", variant="error")
-        with Horizontal():
-            yield Button("Clear", id="clear-selection")
-            yield Label(id="label-library")
-        yield DirOnlyTree(Path.home())
+        with Container(id="dirpicker"):
+            with Horizontal():
+                yield Button("Select", id="select", variant="success", disabled=True)
+                yield Button("Clear", id="clear")
+                yield Button("Cancel", id="cancel", variant="error")
+            with Horizontal():
+                yield Button("Clear", id="clear-selection")
+                yield Label(id="label-library")
+            yield DirOnlyTree(Path.home())
 
     def on_mount(self):
         self.reset_temp_library()
@@ -113,6 +115,7 @@ class MenuScreen(Screen):
 class MainApp(App):
     """A Textual app to manage stopwatches."""
 
+    CSS_PATH = "style.tcss"
     BINDINGS = [
         ("d", "toggle_dark", "Toggle dark mode"),
         ("s", "play_song", "Play a song"),
