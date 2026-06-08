@@ -1,0 +1,44 @@
+.disabled
+{
+        background: grey;
+}
+#dirpicker
+{
+    #interactibles {
+        height: 3;
+        margin-bottom: 1; /* Slight spacing before the tree starts */
+    }
+
+    #selection-buttons {
+        width: 50%;
+        height: 100%;
+        align: center middle;
+        Button {
+            margin: 0 2;
+        }
+    }
+
+    #library-label {
+        width: 50%;
+        height: 100%;
+        align: left middle;
+        Button {
+            margin-left: 0;
+        }
+        Label {
+            margin-left: 3;
+        }
+    }
+
+    DirOnlyTree {
+        height: 1fr; /* 1 fractional unit pushes it to expand fully */
+    }
+}
+
+#music-container
+{
+    OptionList
+    {
+        height: 100%;
+    }
+}
