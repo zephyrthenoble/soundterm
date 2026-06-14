@@ -1,19 +1,31 @@
 # Soundterm
 
 
-plan:
+features:
 
-if no library, library selection screen
+- [x] if no library, library selection screen
 
-then main screen, which is player on top, tabbed library/playlist
+todo:
+main screen, which is player on top, tabbed library/playlist
+- [ ] library 
+  - [ ] filter (and save filter)
+  - [ ] sort
+  - [ ] multiselect
+    - [ ] add to playlist
+    - [ ] edit
+- [ ] playlist:
+  - [ ] save/load/new playlist
+  - [ ] add filter to playlist to add songs
+  - [ ] filter (and save filter?)
+  - [ ] sort
+  - [ ] multiselect
+    - [ ] remove
 
-screen to see and edit song metadata
-
-library filter/sort, multiselect edit, add to playlist
-
-playlist filter/sort, multiselect remove
-
-save filter at any time, can use filter in playlist to add songs
+song/tag screen
+- [ ] song: screen to see and edit song metadata
+  - [ ] update metadata
+  - [ ] tag songs
+  - [ ] play song and/or preview
 
 
 ------------------
