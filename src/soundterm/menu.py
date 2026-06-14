@@ -9,22 +9,17 @@ from textual.widgets.option_list import DuplicateID
 from textual import log
 from textual.app import ComposeResult
 from textual.message import Message
-from textual.containers import Horizontal, Container, HorizontalScroll
+from textual.containers import Horizontal, Container
 from textual.screen import Screen
 from textual.widgets import (
     Footer,
     Header,
-    DirectoryTree,
     Label,
-    Button,
-    Rule,
     OptionList,
     DataTable,
-    Static,
     ProgressBar,
 )
 from textual.widgets.option_list import Option
-from textual.reactive import reactive
 from textual.visual import VisualType
 
 from pygame import mixer, USEREVENT, event, Sound
@@ -197,7 +192,7 @@ class MenuScreen(Screen):
                 ol.add_option(Option(row, id=str(hash(row))))
             except ValueError as e:
                 log.error(f"{row}: {e}")
-            except DuplicateID as e:
+            except DuplicateID:
                 log.warning(f"{row} already exists with hash {hash(row)}")
 
     def action_add_song(self):

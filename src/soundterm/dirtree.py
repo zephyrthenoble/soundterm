@@ -4,28 +4,17 @@ from typing import Iterable
 from pathlib import Path
 
 import tomlkit
-from textual import log
 from textual.app import ComposeResult
-from textual.message import Message
 from textual.containers import Horizontal, Container, HorizontalScroll
 from textual.screen import Screen
 from textual.widgets import (
-    Footer,
-    Header,
     DirectoryTree,
     Label,
     Button,
     Rule,
-    OptionList,
-    DataTable,
-    Static,
-    ProgressBar,
 )
-from textual.widgets.option_list import Option
 from textual.reactive import reactive
-from textual.visual import VisualType
 
-from pygame import mixer, USEREVENT, event, Sound
 
 
 class DirOnlyTree(DirectoryTree):

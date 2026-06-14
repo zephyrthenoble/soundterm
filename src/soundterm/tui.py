@@ -3,34 +3,12 @@ from soundterm.config import config, debug
 from soundterm.menu import MenuScreen
 from soundterm.dirtree import DirPicker
 
-from typing import Iterable, Any
 from pathlib import Path
 
-from rich.table import Table
 
-from textual import log
-from textual.app import App, ComposeResult
-from textual.message import Message
-from textual.containers import Horizontal, Container, HorizontalScroll
-from textual.screen import Screen
-from textual.widgets import (
-    Footer,
-    Header,
-    DirectoryTree,
-    Label,
-    Button,
-    Rule,
-    OptionList,
-    DataTable,
-    Static,
-    ProgressBar,
-)
-from textual.widgets.option_list import Option
-from textual.reactive import reactive
-from textual.visual import VisualType
+from textual.app import App
 
 
-from platformdirs import PlatformDirs
 
 RUNNING = True
 
